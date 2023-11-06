@@ -7,3 +7,7 @@ const (
 	ConsumerPort       = ":8081"
 	KafkaServerAddress = "localhost:9092"
 )
+
+func main() {
+
+}
