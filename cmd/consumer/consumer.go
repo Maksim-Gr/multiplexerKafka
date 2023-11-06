@@ -21,3 +21,11 @@ func main() {
 	brokers := "localhost:9092"
 	consumer, err := sarama.NewConsumerGroup(strings.Split(brokers, ","), ConsumerGroup, config)
 }
+
+type Consumer struct {
+	ready chan bool
+}
+
+func (consumer *Consumer) ConsumeClaim() {
+
+}
