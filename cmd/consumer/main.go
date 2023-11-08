@@ -5,8 +5,11 @@ import (
 	"errors"
 	"github.com/IBM/sarama"
 	"log"
+	"os"
+	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
 )
 
 type Consumer struct {
@@ -23,11 +26,12 @@ func (consumer *Consumer) Cleanup(sarama.ConsumerGroupSession) error {
 }
 
 func main() {
+	keepRunning := true
 	config := sarama.NewConfig()
 	config.ClientID = "multiplexer"
 	config.Consumer.Return.Errors = true
 
-	brokers := "localhost:9092"
+	brokers := "localhost:29093"
 	topic := "notification"
 	group := "test-consumer-group"
 	ctx, cancel := context.WithCancel(context.Background())
@@ -38,6 +42,7 @@ func main() {
 	if err != nil {
 		log.Panicf("Error creating cosnumer group client: %v", err)
 	}
+	consumptionIsPaused := false
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
 	go func() {
@@ -57,8 +62,40 @@ func main() {
 	}()
 	<-consumer.ready
 	log.Println("consumer is up and running")
+	sigusr1 := make(chan os.Signal, 1)
+	signal.Notify(sigusr1, syscall.SIGUSR1)
+
+	sigterm := make(chan os.Signal, 1)
+	signal.Notify(sigterm, syscall.SIGINT, syscall.SIGTERM)
+
+	for keepRunning {
+		select {
+		case <-ctx.Done():
+			log.Println("terminating: context cancelled")
+			keepRunning = false
+		case <-sigterm:
+			log.Println("terminating: via signal")
+			keepRunning = false
+		case <-sigusr1:
+			toggleConsumptionFlow(client, &consumptionIsPaused)
+		}
+	}
 	cancel()
 	wg.Wait()
+	if err = client.Close(); err != nil {
+		log.Panicf("Error closing client: %v", err)
+	}
+}
+func toggleConsumptionFlow(client sarama.ConsumerGroup, isPaused *bool) {
+	if *isPaused {
+		client.ResumeAll()
+		log.Println("Resuming consumption")
+	} else {
+		client.PauseAll()
+		log.Println("Pausing consumption")
+	}
+
+	*isPaused = !*isPaused
 }
 
 func (consumer *Consumer) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
